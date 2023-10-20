@@ -25,3 +25,9 @@ _build
 # Docs
 docs/_build
 **jupyter_execute
+*.mp4*
+*.mp4*
+scripts/against/highway_against_ppo/against_test/*
+highway_attention_ppo/PPO_*/*
+scripts/against/highway_against_ppo/PPO_*/*
+*.zip

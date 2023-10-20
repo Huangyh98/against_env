@@ -14,6 +14,8 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 import highway_env
+from gymnasium.wrappers import RecordVideo
+from stable_baselines3.common.env_checker import check_env
 
 # ==================================
 #        Policy Architecture
@@ -272,20 +274,22 @@ class CustomExtractor(BaseFeaturesExtractor):
 # ==================================
 
 def make_configure_env(**kwargs):
-    env = gym.make(kwargs["id"])
+    env = gym.make(kwargs["id"], render_mode="rgb_array")
     env.configure(kwargs["config"])
+    env.configure({"show_trajectories": True})
+    # env.viewer.set_agent_action_sequence(action)
+    # env.step(action[0])
     env.reset()
     return env
 
 
 env_kwargs = {
-    'id': 'highway-v0',
+    'id': 'highway-against-v0',
     'config': {
         "lanes_count": 3,
-        "vehicles_count": 15,
+        "vehicles_count": 20,
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 10,
             "features": [
                 "presence",
                 "x",
@@ -298,9 +302,10 @@ env_kwargs = {
             "absolute": False
         },
         "policy_frequency": 2,
-        "duration": 40,
+        "duration": 80,
     }
 }
+
 
 
 # ==================================
@@ -363,34 +368,54 @@ def compute_vehicles_attention(env, model):
 # ==================================
 
 if __name__ == "__main__":
-    train = False
+    train = True
+
+    # highway_env.register_highway_envs()
+
     if train:
-        n_cpu = 14
+        n_cpu = 8
         policy_kwargs = dict(
             features_extractor_class=CustomExtractor,
             features_extractor_kwargs=attention_network_kwargs,
         )
         env = make_vec_env(make_configure_env, n_envs=n_cpu, seed=0, vec_env_cls=SubprocVecEnv, env_kwargs=env_kwargs)
-        model = PPO("MlpPolicy", env,
-                    n_steps=512 // n_cpu,
-                    batch_size=64,
-                    learning_rate=2e-3,
+        model = PPO("MultiInputPolicy", env,
+                    n_steps= 512 // n_cpu,
+                    batch_size= 64,
+                    learning_rate= 2e-3,
                     policy_kwargs=policy_kwargs,
-                    verbose=2,
-                    tensorboard_log="highway_attention_ppo/")
+                    verbose= 2,
+                    tensorboard_log="scripts/against/highway_against_ppo/")
         # Train the agent
         model.learn(total_timesteps=20*1000)
         # Save the agent
-        model.save("highway_attention_ppo/model")
+        model.save("scripts/against/highway_against_ppo/model")
 
-    model = PPO.load("highway_attention_ppo/model")
+
+# 测试模型
+    model = PPO.load("scripts/against/highway_against_ppo/model")
     env = make_configure_env(**env_kwargs)
     env.render()
-    env.viewer.set_agent_display(functools.partial(display_vehicles_attention, env=env, model=model))
-    for _ in range(5):
+    env = RecordVideo(env, video_folder="scripts/against/highway_against_ppo/against_test",
+              episode_trigger=lambda e: True)  # record all episodes
+    # env.viewer.set_agent_display(functools.partial(display_vehicles_attention, env=env, model=model))
+
+    # Provide the video recorder to the wrapped environment
+    # so it can send it intermediate simulation frames.
+    env.unwrapped.set_record_video_wrapper(env)
+
+    for _ in range(10):
         obs, info = env.reset()
         done = truncated = False
         while not (done or truncated):
-            action, _ = model.predict(obs)
+            action = env.action_space.sample()
             obs, reward, done, truncated, info = env.step(action)
             env.render()
+        env.close()
+    # for _ in range(5):
+    #     obs, info = env.reset()
+    #     done = truncated = False
+    #     while not (done or truncated):
+    #         action, _ = model.predict(obs)
+    #         obs, reward, done, truncated, info = env.step(action)
+    #         env.render()

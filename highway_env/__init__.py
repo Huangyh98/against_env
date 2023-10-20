@@ -101,3 +101,8 @@ def register_highway_envs():
         entry_point='highway_env.envs:UTurnEnv'
     )
 
+    # highway_against_env.py
+    register(
+        id='highway-against-v0',
+        entry_point='highway_env.envs:HighwayAgainstEnv',
+    )
