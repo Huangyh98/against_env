@@ -25,8 +25,21 @@ class HighwayAgainstEnv(AbstractEnv):
     def default_config(cls) -> dict:
         config = super().default_config()
         config.update({
+            # "observation": {
+            #     "type": "Kinematics"
+            # },
             "observation": {
-                "type": "Kinematics"
+                "type": "Kinematics",
+                "features": [
+                    "presence",
+                    "x",
+                    "y",
+                    "vx",
+                    "vy",
+                    "cos_h",
+                    "sin_h"
+                ],
+            "absolute": False
             },
             "action": {
                 "type": "DiscreteMetaAction",
@@ -38,14 +51,15 @@ class HighwayAgainstEnv(AbstractEnv):
             "duration": 40,  # [s]
             "ego_spacing": 2,
             "vehicles_density": 1,
-            "collision_reward": 0.7,    # The reward received when colliding with a vehicle.
+            "collision_reward": 4,    # The reward received when colliding with a vehicle.
             "right_lane_reward": 0,  # The reward received when driving on the right-most lanes, linearly mapped to
                                        # zero for other lanes.
             "high_speed_reward": 0,  # The reward received when driving at full speed, linearly mapped to zero for
                                        # lower speeds according to config["reward_speed_range"].
-            "lane_change_reward": 0.5,   # The reward received at each lane change action.
-            "sparse_reward": 1,
-            "on_road_reward": 0.5,
+            "lane_change_reward": 0.05,   # The reward received at each lane change action.
+            "sparse_reward": 0.2,
+            "acce_reward": 0.2,
+            "on_road_reward": 0.05,
             "reward_speed_range": [20, 30],
             "normalize_reward": True,
             "offroad_terminal": False
@@ -70,21 +84,13 @@ class HighwayAgainstEnv(AbstractEnv):
         for others in other_per_controlled:
             vehicle = Vehicle.create_random(
                 self.road,
-                speed=20,
+                # speed=20,
                 lane_id=self.config["initial_lane_id"],
                 spacing= self.config["ego_spacing"]
             )
             vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
-
-            # i = 1
-            # for _ in range(others):
-            #     # vehicle = other_vehicles_type.create_random(self.road, spacing= - (i-1) * (1 / self.config["vehicles_density"]))
-            #     vehicle = other_vehicles_type.create_random(self.road, spacing= - i + (1 / self.config["vehicles_density"]))
-            #     vehicle.randomize_behavior()
-            #     self.road.vehicles.append(vehicle)
-            #     i += i
 
             i = 1
             for _ in range(others):
@@ -110,11 +116,15 @@ class HighwayAgainstEnv(AbstractEnv):
         :return: the corresponding reward
         """
         rewards = self._rewards(action)
+        # print("/////////////////////")
+        # print(rewards)
+        # print("/////////////////////")
         reward = sum(self.config.get(name, 0) * reward for name, reward in rewards.items())
         if self.config["normalize_reward"]:
             reward = utils.lmap(reward,
-                                [0,
-                                  self.config["sparse_reward"]],
+                                [self.config["lane_change_reward"] + self.config["acce_reward"],
+                                # [0,
+                                  self.config["sparse_reward"] + self.config["collision_reward"]],
                                 [0, 1])
         reward *= rewards['on_road_reward']
         return reward
@@ -127,59 +137,44 @@ class HighwayAgainstEnv(AbstractEnv):
         forward_speed = self.vehicle.speed * np.cos(self.vehicle.heading)
         scaled_speed = utils.lmap(forward_speed, self.config["reward_speed_range"], [0, 1])
         
-        # 距离稀疏奖励
+    # 距离稀疏奖励
         neighbors = self.road.vehicles  # 获取道路上的所有车辆
         vehicle_position = self.vehicle.position  # 获取被控车辆的位置
+        vehicle_velocity = self.vehicle.velocity  # 获取被控车辆的位置
         min_distance = float('inf')  # 初始化最小距离为正无穷
 
         for neighbor in neighbors:
             if neighbor != self.vehicle:
                 distance = np.linalg.norm(neighbor.position - vehicle_position)
                 min_distance = min(min_distance, distance)
-        # 设置稀疏奖励，距离越近奖励越高，距离越远惩罚越高
-        sparse_reward = 1.0 / (1.0 + min_distance)
+        # 设置稀疏奖励，距离越近奖励越高
+        sparse_reward = 1.0 / (1 + min_distance)
 
-        # ## 设置连续变道惩罚
-        # # 检测是否连续变道
-        # lane_change_reward = 0.0  # 初始化连续变道惩罚为零
-        # self.last_action = None
-        # if action in [0, 2]:
-        #     if action != self.last_action:
-        #         self.last_action = action
-        #     else:
-        #         lane_change_reward = -0.4  # 给连续变道一个负奖励
+    # # 加速度惩罚
+    #     vehicle_velocity = self.vehicle.velocity  # 获取被控车辆的位置
+    #     self.last_velocity = None
+    #     acceleration = float('inf')
+    #     if self.last_velocity is None:
+    #         self.last_velocity = vehicle_velocity
+        
+    #     acceleration = vehicle_velocity - self.last_velocity
+    #             # 计算速度变化的平滑度奖励
+    #     acce_reward = -abs(acceleration)
+    #     # acce_reward = -(abs(acceleration) ** 2)
+    #     self.last_velocity = vehicle_velocity  # 更新上一步速度
 
+
+    # 变道惩罚
         lane_change_reward = 0.0  # 初始化变道奖励为0+
         if action in [0, 2]:
             lane_change_reward = -1
-        # min_distance_to_other_vehicle = float('inf')
-
-        # for neighbor in self.road.vehicles:
-        #     if neighbor != self.vehicle:
-        #         distance = np.linalg.norm(neighbor.position - self.vehicle.position)
-
-        #         # 检查是否在同一车道
-        #         if self.vehicle.lane_index == neighbor.lane_index:
-        #             if distance < 5:  # 同一车道且距离足够近，进行变道处罚
-        #                 if action in [0, 2]:
-        #                     lane_change_reward = -1
-        #         else:
-        #             if distance < 5:  # 不同车道且距离足够近，进行变道奖励
-        #                 if action in [0, 2]:
-        #                     lane_change_reward = 1
-
-        #         min_distance_to_other_vehicle = min(min_distance_to_other_vehicle, distance)
-
-
+        
         return {
-            # "collision_reward": float(self.vehicle.crashed),
-            # "right_lane_reward": lane / max(len(neighbours) - 1, 1),
-            # "high_speed_reward": np.clip(scaled_speed, 0, 1), 
+            "collision_reward": float(self.vehicle.crashed), # collision reward
             "on_road_reward": float(self.vehicle.on_road), # 在车道奖励
             "sparse_reward": sparse_reward, # 距离奖励
-            "lane_change_reward": lane_change_reward, # 连续变道惩罚
-            # "close_lane_change_reward": close_lane_change_reward,
-            # "lane_reward": lane_reward  # 新增的车道奖励
+            "lane_change_reward": lane_change_reward,    # 变道惩罚
+            # "acce_reward": float(acce_reward),  # acceleration penalty
         }
 
     def _is_terminated(self) -> bool:

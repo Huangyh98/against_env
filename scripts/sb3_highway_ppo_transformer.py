@@ -13,6 +13,7 @@ from torch.nn import functional as F
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
+from gymnasium.wrappers import RecordVideo
 import highway_env
 
 # ==================================
@@ -272,20 +273,20 @@ class CustomExtractor(BaseFeaturesExtractor):
 # ==================================
 
 def make_configure_env(**kwargs):
-    env = gym.make(kwargs["id"])
+    env = gym.make(kwargs["id"], render_mode="rgb_array")
     env.configure(kwargs["config"])
     env.reset()
     return env
 
 
 env_kwargs = {
-    'id': 'highway-v0',
+    'id': 'highway-fast-v0',
     'config': {
         "lanes_count": 3,
         "vehicles_count": 15,
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 10,
+            # "vehicles_count": 5,
             "features": [
                 "presence",
                 "x",
@@ -363,8 +364,9 @@ def compute_vehicles_attention(env, model):
 # ==================================
 
 if __name__ == "__main__":
-    train = False
+    train = True
     if train:
+        highway_env.register_highway_envs()
         n_cpu = 14
         policy_kwargs = dict(
             features_extractor_class=CustomExtractor,
@@ -373,7 +375,7 @@ if __name__ == "__main__":
         env = make_vec_env(make_configure_env, n_envs=n_cpu, seed=0, vec_env_cls=SubprocVecEnv, env_kwargs=env_kwargs)
         model = PPO("MlpPolicy", env,
                     n_steps=512 // n_cpu,
-                    batch_size=64,
+                    batch_size=128,
                     learning_rate=2e-3,
                     policy_kwargs=policy_kwargs,
                     verbose=2,
@@ -386,11 +388,18 @@ if __name__ == "__main__":
     model = PPO.load("highway_attention_ppo/model")
     env = make_configure_env(**env_kwargs)
     env.render()
-    env.viewer.set_agent_display(functools.partial(display_vehicles_attention, env=env, model=model))
+    # env.viewer.set_agent_display(functools.partial(display_vehicles_attention, env=env, model=model))
     for _ in range(5):
         obs, info = env.reset()
+        print(obs)
         done = truncated = False
+        env = RecordVideo(env, video_folder="highway_attention_ppo/model_test",
+        episode_trigger=lambda e: True)
+        env.unwrapped.set_record_video_wrapper(env)
         while not (done or truncated):
             action, _ = model.predict(obs)
             obs, reward, done, truncated, info = env.step(action)
+            velocities = np.array([vehicle.velocity for vehicle in env.unwrapped.road.vehicles])
+            print("车辆速度:", velocities[0])
+            print("action:", action)
             env.render()

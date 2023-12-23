@@ -44,7 +44,7 @@ class RoadObject(ABC):
 
         # If False, this object will not check its own collisions, but it can still collides with other objects that do
         # check their collisions.
-        self.check_collisions = True
+        self.check_collisions = False
 
         self.diagonal = np.sqrt(self.LENGTH**2 + self.WIDTH**2)
         self.crashed = False

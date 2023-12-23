@@ -27,7 +27,6 @@ class HighwayAgainstEnvMulti(AbstractEnv):
     """
     def __init__(self, config: dict = None, render_mode: Optional[str] = None) -> None:
         super().__init__(config, render_mode)
-        print("hello")
         # model = PPO.load("scripts/against/highway_against_ppo/model")
 
 
@@ -42,15 +41,26 @@ class HighwayAgainstEnvMulti(AbstractEnv):
             #     "type": "DiscreteMetaAction",
             # },
             "observation": {
-                "type": "MultiAgentObservation",
-                "observation_config": {
-                    "type": "Kinematics"
-                }
+            "type": "MultiAgentObservation",
+            "observation_config": {
+                    "type": "Kinematics",
+                    "features": [
+                        "presence",
+                        "x",
+                        "y",
+                        "vx",
+                        "vy",
+                        "cos_h",
+                        "sin_h"
+                    ],
             },
+
+            "absolute": False
+        },
             "action": {
-                "type": "MultiAgentAction",
-                "action_config": {
-                    "type": "DiscreteMetaAction",
+            "type": "MultiAgentAction",
+            "action_config": {
+                "type": "DiscreteMetaAction",
                 }
             },
             "lanes_count": 4,
@@ -60,12 +70,12 @@ class HighwayAgainstEnvMulti(AbstractEnv):
             "duration": 40,  # [s]
             "ego_spacing": 2,
             "vehicles_density": 1,
-            "collision_reward": 0.7,    # The reward received when colliding with a vehicle.
-            "right_lane_reward": 0,  # The reward received when driving on the right-most lanes, linearly mapped to
+            "collision_reward": - 0.7,    # The reward received when colliding with a vehicle.
+            "right_lane_reward": 0.1,  # The reward received when driving on the right-most lanes, linearly mapped to
                                        # zero for other lanes.
-            "high_speed_reward": 0,  # The reward received when driving at full speed, linearly mapped to zero for
+            "high_speed_reward": 0.5,  # The reward received when driving at full speed, linearly mapped to zero for
                                        # lower speeds according to config["reward_speed_range"].
-            "lane_change_reward": 0.5,   # The reward received at each lane change action.
+            "lane_change_reward": 0,   # The reward received at each lane change action.
             "sparse_reward": 1,
             "on_road_reward": 0.5,
             "reward_speed_range": [20, 30],
@@ -91,13 +101,12 @@ class HighwayAgainstEnvMulti(AbstractEnv):
 
         self.controlled_vehicles = []
         color_i = 0 
-        color_list_i = [VehicleGraphics.EGO_COLOR,VehicleGraphics.YELLOW]
+        color_list_i = [VehicleGraphics.EGO_COLOR,VehicleGraphics.PURPLE]
         for others in other_per_controlled:
             vehicle = Vehicle.create_random(
                 self.road,
-                speed=20,
-                lane_id=self.config["initial_lane_id"],
-                spacing= self.config["ego_spacing"]
+                lane_id = self.config["initial_lane_id"],
+                spacing = self.config["ego_spacing"]
             )
             vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
 
@@ -105,14 +114,6 @@ class HighwayAgainstEnvMulti(AbstractEnv):
             color_i +=1
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
-
-            # i = 1
-            # for _ in range(others):
-            #     # vehicle = other_vehicles_type.create_random(self.road, spacing= - (i-1) * (1 / self.config["vehicles_density"]))
-            #     vehicle = other_vehicles_type.create_random(self.road, spacing= - i + (1 / self.config["vehicles_density"]))
-            #     vehicle.randomize_behavior()
-            #     self.road.vehicles.append(vehicle)
-            #     i += i
 
             i = 1
             for _ in range(others):
@@ -132,21 +133,44 @@ class HighwayAgainstEnvMulti(AbstractEnv):
                 i += 1
 
     def _reward(self, action: Action) -> float:
-        """
-        The reward is defined to foster driving at high speed, on the rightmost lanes, and to avoid collisions.
-        :param action: the last action performed
-        :return: the corresponding reward
-        """
         rewards = self._rewards(action)
         reward = sum(self.config.get(name, 0) * reward for name, reward in rewards.items())
         if self.config["normalize_reward"]:
             reward = utils.lmap(reward,
-                                [0,
+                                [self.config["collision_reward"],
                                   self.config["sparse_reward"]],
                                 [0, 1])
         reward *= rewards['on_road_reward']
         return reward
 
+    # def _reward(self, action: Action) -> float:
+    #     rewards = self._rewards(action)
+    #     reward_ego = (- self.config.get("collision_reward") * rewards["collision_reward"])
+    #     + self.config.get("collision_reward", 0) * rewards["collision_reward"]
+    #     + self.config.get("right_lane_reward", 0) * rewards["collision_reward"]
+    #     + self.config.get("high_speed_reward", 0) * rewards["collision_reward"] 
+    #     + self.config.get("on_road_reward", 0) * rewards["collision_reward"]   
+                       
+    #     reward_against = self.config.get("collision_reward", 0) * rewards["collision_reward"]
+    #     + self.config.get("lane_change_reward", 0) * rewards["collision_reward"]
+    #     + self.config.get("on_road_reward", 0) * rewards["collision_reward"]
+    #     + self.config.get("sparse_reward", 0) * rewards["collision_reward"]
+
+    #     print(reward_ego, reward_against)
+
+    #     reward = (reward_ego, reward_against)
+
+        # print(reward)
+
+        # if self.config["normalize_reward"]:
+        #     reward = utils.lmap(reward,
+        #                         [self.config["lane_change_reward"],
+        #                           self.config["sparse_reward"] + self.config["collision_reward"]],
+        #                         [0, 1])
+        # reward *= rewards['on_road_reward']
+        # return reward
+
+        
     def _rewards(self, action: Action) -> Dict[Text, float]:
         neighbours = self.road.network.all_side_lanes(self.vehicle.lane_index)
         lane = self.vehicle.target_lane_index[2] if isinstance(self.vehicle, ControlledVehicle) \
@@ -167,45 +191,34 @@ class HighwayAgainstEnvMulti(AbstractEnv):
         # 设置稀疏奖励，距离越近奖励越高，距离越远惩罚越高
         sparse_reward = 1.0 / (1.0 + min_distance)
 
-        # ## 设置连续变道惩罚
-        # # 检测是否连续变道
-        # lane_change_reward = 0.0  # 初始化连续变道惩罚为零
-        # self.last_action = None
-        # if action in [0, 2]:
-        #     if action != self.last_action:
-        #         self.last_action = action
-        #     else:
-        #         lane_change_reward = -0.4  # 给连续变道一个负奖励
-
         lane_change_reward = 0.0  # 初始化变道奖励为0+
         if action in [0, 2]:
             lane_change_reward = -1
-        # min_distance_to_other_vehicle = float('inf')
 
-        # for neighbor in self.road.vehicles:
-        #     if neighbor != self.vehicle:
-        #         distance = np.linalg.norm(neighbor.position - self.vehicle.position)
+        # # 碰撞奖励
+        # # 获取被控车辆和其他车辆的信息
+        # ego_vehicle = self.vehicle
+        # other_vehicles = self.unwrapped.road.vehicles
 
-        #         # 检查是否在同一车道
-        #         if self.vehicle.lane_index == neighbor.lane_index:
-        #             if distance < 5:  # 同一车道且距离足够近，进行变道处罚
-        #                 if action in [0, 2]:
-        #                     lane_change_reward = -1
-        #         else:
-        #             if distance < 5:  # 不同车道且距离足够近，进行变道奖励
-        #                 if action in [0, 2]:
-        #                     lane_change_reward = 1
+        # # 检查是否有碰撞
+        # collision_with_ego = any(ego_vehicle.check_collision(vehicle) for vehicle in other_vehicles)
 
-        #         min_distance_to_other_vehicle = min(min_distance_to_other_vehicle, distance)
+        # # 根据碰撞与否给予奖励或惩罚
+        # if collision_with_ego:
+        #     collision_reward_ego = 1  # 与 ego_vehicle 碰撞，给予奖励
+        # else:
+        #     collision_reward_ego = - 1  # 未与 ego_vehicle 碰撞，给予惩罚
+
+
 
 
         return {
-            # "collision_reward": float(self.vehicle.crashed),
-            # "right_lane_reward": lane / max(len(neighbours) - 1, 1),
-            # "high_speed_reward": np.clip(scaled_speed, 0, 1), 
+            "collision_reward": float(self.vehicle.crashed),
+            "right_lane_reward": lane / max(len(neighbours) - 1, 1),
+            "high_speed_reward": np.clip(scaled_speed, 0, 1), 
             "on_road_reward": float(self.vehicle.on_road), # 在车道奖励
-            "sparse_reward": sparse_reward, # 距离奖励
-            "lane_change_reward": lane_change_reward, # 连续变道惩罚
+            # "sparse_reward": sparse_reward, # 距离奖励
+            # "lane_change_reward": lane_change_reward, # 连续变道惩罚
             # "close_lane_change_reward": close_lane_change_reward,
             # "lane_reward": lane_reward  # 新增的车道奖励
         }
