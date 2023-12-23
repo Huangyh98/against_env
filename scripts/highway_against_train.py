@@ -277,32 +277,41 @@ def make_configure_env(**kwargs):
     env = gym.make(kwargs["id"], render_mode="rgb_array")
     env.configure(kwargs["config"])
     env.configure({"show_trajectories": True})
-    # env.viewer.set_agent_action_sequence(action)
-    # env.step(action[0])
     env.reset()
     return env
 
 
 env_kwargs = {
-    'id': 'highway-against-v0',
+    'id': 'highway-against-multi-v0',
     'config': {
         "lanes_count": 3,
-        "vehicles_count": 20,
+        "vehicles_count": 1,
         "observation": {
-            "type": "Kinematics",
-            "features": [
-                "presence",
-                "x",
-                "y",
-                "vx",
-                "vy",
-                "cos_h",
-                "sin_h"
-            ],
+            "type": "MultiAgentObservation",
+            "observation_config": {
+                    "type": "Kinematics",
+                    "features": [
+                        "presence",
+                        "x",
+                        "y",
+                        "vx",
+                        "vy",
+                        "cos_h",
+                        "sin_h"
+                    ],
+            },
+
             "absolute": False
         },
+        "action": {
+                "type": "MultiAgentAction",
+                "action_config": {
+                    "type": "DiscreteMetaAction",
+                }
+            },
         "policy_frequency": 2,
         "duration": 80,
+        "controlled_vehicles": 2,
     }
 }
 
@@ -368,7 +377,7 @@ def compute_vehicles_attention(env, model):
 # ==================================
 
 if __name__ == "__main__":
-    train = True
+    train = False
 
     # highway_env.register_highway_envs()
 
@@ -387,7 +396,7 @@ if __name__ == "__main__":
                     verbose= 2,
                     tensorboard_log="scripts/against/highway_against_ppo/")
         # Train the agent
-        model.learn(total_timesteps=20*1000)
+        model.learn(total_timesteps=10*1000)
         # Save the agent
         model.save("scripts/against/highway_against_ppo/model")
 
@@ -396,6 +405,7 @@ if __name__ == "__main__":
     model = PPO.load("scripts/against/highway_against_ppo/model")
     env = make_configure_env(**env_kwargs)
     env.render()
+    print(env.config)
     env = RecordVideo(env, video_folder="scripts/against/highway_against_ppo/against_test",
               episode_trigger=lambda e: True)  # record all episodes
     # env.viewer.set_agent_display(functools.partial(display_vehicles_attention, env=env, model=model))
@@ -403,19 +413,21 @@ if __name__ == "__main__":
     # Provide the video recorder to the wrapped environment
     # so it can send it intermediate simulation frames.
     env.unwrapped.set_record_video_wrapper(env)
+    env.reset()
+    env.reset(seed=0)
 
     for _ in range(10):
         obs, info = env.reset()
         done = truncated = False
+        print(obs)
         while not (done or truncated):
             action = env.action_space.sample()
+            action1, _ = model.predict(obs[0])
+            action2, _ = model.predict(obs[1])
+            action=(action1,action2)
             obs, reward, done, truncated, info = env.step(action)
             env.render()
         env.close()
-    # for _ in range(5):
-    #     obs, info = env.reset()
-    #     done = truncated = False
-    #     while not (done or truncated):
-    #         action, _ = model.predict(obs)
-    #         obs, reward, done, truncated, info = env.step(action)
-    #         env.render()
+
+
+

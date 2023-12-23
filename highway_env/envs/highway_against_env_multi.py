@@ -1,4 +1,4 @@
-from typing import Dict, Text
+from typing import Dict, Optional, Text
 
 import numpy as np
 
@@ -10,30 +10,52 @@ from highway_env.utils import near_split
 from highway_env.vehicle.controller import ControlledVehicle
 from highway_env.vehicle.kinematics import Vehicle
 import random
+
+
+from highway_env.vehicle.graphics import VehicleGraphics
+
 Observation = np.ndarray
 
 
-class HighwayAgainstEnv(AbstractEnv):
+class HighwayAgainstEnvMulti(AbstractEnv):
     """
     A highway driving environment.
 
     The vehicle is driving on a straight highway with several lanes, and is rewarded for reaching a high speed,
     staying on the rightmost lanes and avoiding collisions.
+
     """
+    def __init__(self, config: dict = None, render_mode: Optional[str] = None) -> None:
+        super().__init__(config, render_mode)
+        print("hello")
+        # model = PPO.load("scripts/against/highway_against_ppo/model")
+
 
     @classmethod
     def default_config(cls) -> dict:
         config = super().default_config()
         config.update({
+            # "observation": {
+            #     "type": "Kinematics"
+            # },
+            # "action": {
+            #     "type": "DiscreteMetaAction",
+            # },
             "observation": {
-                "type": "Kinematics"
+                "type": "MultiAgentObservation",
+                "observation_config": {
+                    "type": "Kinematics"
+                }
             },
             "action": {
-                "type": "DiscreteMetaAction",
+                "type": "MultiAgentAction",
+                "action_config": {
+                    "type": "DiscreteMetaAction",
+                }
             },
             "lanes_count": 4,
             "vehicles_count": 50,
-            "controlled_vehicles": 1,
+            "controlled_vehicles": 2,
             "initial_lane_id": None,
             "duration": 40,  # [s]
             "ego_spacing": 2,
@@ -64,9 +86,12 @@ class HighwayAgainstEnv(AbstractEnv):
     def _create_vehicles(self) -> None:
         """Create some new random vehicles of a given type, and add them on the road."""
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
+
         other_per_controlled = near_split(self.config["vehicles_count"], num_bins=self.config["controlled_vehicles"])
 
         self.controlled_vehicles = []
+        color_i = 0 
+        color_list_i = [VehicleGraphics.EGO_COLOR,VehicleGraphics.YELLOW]
         for others in other_per_controlled:
             vehicle = Vehicle.create_random(
                 self.road,
@@ -75,6 +100,9 @@ class HighwayAgainstEnv(AbstractEnv):
                 spacing= self.config["ego_spacing"]
             )
             vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
+
+            vehicle.color = color_list_i[color_i]
+            color_i +=1
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
 
@@ -192,29 +220,29 @@ class HighwayAgainstEnv(AbstractEnv):
         return self.time >= self.config["duration"]
 
 
-class HighwayAgainstEnvFast(HighwayAgainstEnv):
-    """
-    A variant of highway-v0 with faster execution:
-        - lower simulation frequency
-        - fewer vehicles in the scene (and fewer lanes, shorter episode duration)
-        - only check collision of controlled vehicles with others
-    """
-    @classmethod
-    def default_config(cls) -> dict:
-        cfg = super().default_config()
-        cfg.update({
-            "simulation_frequency": 5,
-            "lanes_count": 3,
-            "vehicles_count": 20,
-            "duration": 30,  # [s]
-            "ego_spacing": 1.5,
-        })
-        return cfg
+# class HighwayAgainstEnvFast(HighwayAgainstEnv):
+#     """
+#     A variant of highway-v0 with faster execution:
+#         - lower simulation frequency
+#         - fewer vehicles in the scene (and fewer lanes, shorter episode duration)
+#         - only check collision of controlled vehicles with others
+#     """
+#     @classmethod
+#     def default_config(cls) -> dict:
+#         cfg = super().default_config()
+#         cfg.update({
+#             "simulation_frequency": 5,
+#             "lanes_count": 3,
+#             "vehicles_count": 20,
+#             "duration": 30,  # [s]
+#             "ego_spacing": 1.5,
+#         })
+#         return cfg
 
-    def _create_vehicles(self) -> None:
-        super()._create_vehicles()
-        # Disable collision check for uncontrolled vehicles
-        for vehicle in self.road.vehicles:
-            if vehicle not in self.controlled_vehicles:
-                vehicle.check_collisions = False
+#     def _create_vehicles(self) -> None:
+#         super()._create_vehicles()
+#         # Disable collision check for uncontrolled vehicles
+#         for vehicle in self.road.vehicles:
+#             if vehicle not in self.controlled_vehicles:
+#                 vehicle.check_collisions = False
 
